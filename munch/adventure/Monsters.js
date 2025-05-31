@@ -2,6 +2,7 @@ const logger = require("../logger.js");
 
 const { Database } = require("./Database.js");
 
+const fse = require("fs-extra");
 const fs = require("fs");
 const path = require("path");
 
@@ -76,20 +77,23 @@ class Monsters {
   }
 
   async write() {
-    if (!fs.existsSync(this.adventure.config.outputDir)) {
-      fs.mkdirSync(this.adventure.config.outputDir);
-    }
-  
-    this.adventure.config.data.subDirs.forEach((d) => {
-      if (!fs.existsSync(path.join(this.adventure.config.outputDir,d))) {
-        fs.mkdirSync(path.join(this.adventure.config.outputDir,d));
+    try {
+      if (!await fse.pathExists(this.adventure.config.outputDir)) {
+        await fse.mkdirp(this.adventure.config.outputDir);
       }
-    });
-  
-    logger.info("Exporting monster data...");
-
-    // fs.writeFileSync(path.join(this.adventure.config.outputDir,"monster.json"), JSON.stringify(this.data));
-    fs.writeFileSync(path.join(this.adventure.config.outputDir,`${this.adventure.bookCode}.json`), JSON.stringify(this.sourceData));
+      for (const d of this.adventure.config.data.subDirs) {
+        const dirPath = path.join(this.adventure.config.outputDir, d);
+        if (!await fse.pathExists(dirPath)) {
+          await fse.mkdirp(dirPath);
+        }
+      }
+      logger.info("Exporting monster data...");
+      const outPath = path.join(this.adventure.config.outputDir, `${this.adventure.bookCode}.json`);
+      await fse.writeFile(outPath, JSON.stringify(this.sourceData));
+    } catch (err) {
+      logger.error(`Failed to write monster data: ${err.message}`);
+      throw err;
+    }
   }
 
   async process() {

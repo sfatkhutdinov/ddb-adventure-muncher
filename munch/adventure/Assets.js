@@ -67,7 +67,7 @@ class Assets {
       : false;
     if (disableLargeDownloads) return;
 
-    let dlFile = FileHelper.loadFile(path.join(this.adventure.config.sourceDir, "hiRes.json"));
+    let dlFile = await FileHelper.loadFile(path.join(this.adventure.config.sourceDir, "hiRes.json"));
     let downloaded = dlFile && !this.adventure.config.data.forceNew
       ? JSON.parse(dlFile)
       : [];
@@ -77,16 +77,20 @@ class Assets {
       if (!downloaded.includes(listPath)) {
         const dlPath = path.join(this.adventure.config.sourceDir, listPath);
         logger.info(`Downloading Hi Res ${list[i].name} (${dlPath})`);
-        await FileHelper.downloadFile(list[i].url, dlPath, this.adventure.config.downloadTimeout);
-        downloaded.push(listPath);
+        try {
+          await FileHelper.downloadFile(list[i].url, dlPath, this.adventure.config.downloadTimeout);
+          downloaded.push(listPath);
+        } catch (err) {
+          logger.error(`Failed to download ${list[i].name}: ${err.message}`);
+        }
       }
     }
-    FileHelper.saveJSONFile(downloaded, path.join(this.adventure.config.sourceDir, "hiRes.json"));
+    await FileHelper.saveJSONFile(downloaded, path.join(this.adventure.config.sourceDir, "hiRes.json"));
   }
 
   async downloadDDBMobile() {
     logger.info("Checking for missing ddb images...");
-    const targetFilesFile = FileHelper.loadFile(path.join(this.adventure.config.sourceDir, "files.txt"));
+    const targetFilesFile = await FileHelper.loadFile(path.join(this.adventure.config.sourceDir, "files.txt"));
     const targetFiles = targetFilesFile ? JSON.parse(targetFilesFile) : {};
   
     if (!targetFiles.files) return;
@@ -95,17 +99,25 @@ class Assets {
     for (let i = 0; i < list.length; i++) {
       const localUrl = list[i].LocalUrl[0].replace(/^\//,"");
       const dlPath = path.join(this.adventure.config.sourceDir, localUrl);
-      const isLocalFile = fs.existsSync(dlPath);
+      const isLocalFile = await fse.pathExists(dlPath);
       if (!isLocalFile) {
         logger.info(`Downloading DDB Image ${localUrl} (${dlPath})`);
         if (this.adventure.return) this.adventure.returns.statusMessage(`Downloading DDB Image ${localUrl}`);
-        await FileHelper.downloadFile(list[i].RemoteUrl, dlPath, this.adventure.config.downloadTimeout);
+        try {
+          await FileHelper.downloadFile(list[i].RemoteUrl, dlPath, this.adventure.config.downloadTimeout);
+        } catch (err) {
+          logger.error(`Failed to download image ${localUrl}: ${err.message}`);
+        }
         if (list[i].LocalUrl.length > 1) {
           for (let ui = 0; ui < list[i].LocalUrl.length; ui++) {
             const targetUrl = list[i].LocalUrl[ui].replace(/^\//,"");
             if (localUrl !== targetUrl) {
               logger.info(`Copying ${localUrl} to ${targetUrl}`);
-              fse.copySync(dlPath, path.join(this.adventure.config.sourceDir,targetUrl));
+              try {
+                await fse.copy(dlPath, path.join(this.adventure.config.sourceDir,targetUrl));
+              } catch (err) {
+                logger.error(`Failed to copy image to ${targetUrl}: ${err.message}`);
+              }
             }
           }
         }
@@ -113,24 +125,29 @@ class Assets {
     }
   }
 
-  finalAssetCopy() {
-    // To copy a folder or file
-    fse.copySync(this.adventure.config.sourceDir, path.join(this.adventure.config.outputDir,"assets"));
-  
+  async finalAssetCopy() {
+    try {
+      await fse.copy(this.adventure.config.sourceDir, path.join(this.adventure.config.outputDir,"assets"));
+    } catch (err) {
+      logger.error(`Failed to copy sourceDir assets: ${err.message}`);
+    }
     // copy assets files
     const assetFilePath = path.join(this.adventure.config.assetsInfoDir, this.adventure.config.bookCode);
-    if (fs.existsSync(assetFilePath)) {
-      fse.copySync(assetFilePath, path.join(this.adventure.config.outputDir,"assets"));
+    if (await fse.pathExists(assetFilePath)) {
+      try {
+        await fse.copy(assetFilePath, path.join(this.adventure.config.outputDir,"assets"));
+      } catch (err) {
+        logger.error(`Failed to copy assetFilePath: ${err.message}`);
+      }
     }
-  
     const copiedDbPath = path.join(this.adventure.config.outputDir,"assets",`${this.adventure.bookCode}.db3`);
     logger.info(copiedDbPath);
-    if (fs.existsSync(copiedDbPath)) {
+    if (await fse.pathExists(copiedDbPath)) {
       try {
-        fs.unlinkSync(copiedDbPath);
+        await fse.unlink(copiedDbPath);
         //file removed
       } catch(err) {
-        logger.error(err);
+        logger.error(`Failed to remove copiedDbPath: ${err.message}`);
       }
     }
   }
@@ -139,9 +156,14 @@ class Assets {
     const filePath = path.join(this.adventure.config.outputDirEnv,`${this.adventure.bookCode}.fvttadv`);
     logger.info(`Generating adventure zip to ${filePath}`);
     if (this.adventure.return) this.adventure.returns.statusMessage(`Generating adventure zip to ${filePath}`);
-    const zip = FileHelper.getZipOfFolder(this.adventure.config.outputDir);
-    logger.debug(`Zip contains ${Object.keys(zip.files).length} files`);
-    await FileHelper.writeZipFile(zip, filePath);
+    try {
+      const zip = await FileHelper.getZipOfFolder(this.adventure.config.outputDir);
+      logger.debug(`Zip contains ${Object.keys(zip.files).length} files`);
+      await FileHelper.writeZipFile(zip, filePath);
+    } catch (err) {
+      logger.error(`Failed to generate adventure zip: ${err.message}`);
+      throw err;
+    }
   }
 
 }

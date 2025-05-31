@@ -79,15 +79,15 @@ WHERE ContentID = '${contentId}'
   }
 
   query(sql){
-    if (!this.db) return new Error("Database not loaded");
-  
+    if (!this.db) throw new Error("Database not loaded");
     const results = [];
     try {
       const statement = this.db.prepare(sql);
       results.push(...statement.all());  
     } catch (err) {
+      logger.error(`Database query failed: ${sql}`);
       logger.error(err);
-      logger.error(err.stack);
+      throw err;
     }
     return results;
   }
@@ -95,11 +95,9 @@ WHERE ContentID = '${contentId}'
   getData(){
     this.loadDB();
     logger.debug(this.db);
-  
     try {
       const statement = this.db.prepare(Database.getAllSQL);
       const rows = statement.all();
-
       for (const row of rows) {
         const data = {
           id: row.id,
@@ -112,16 +110,18 @@ WHERE ContentID = '${contentId}'
         if (row.cobaltId ?? row.cobaltId != null)
           this.adventure.rowHints.parents.push(data);
       }
-
       for (const row of rows) {
-        const rowObject = new Row(this.adventure, row);
-        this.adventure.processRow(rowObject);
+        try {
+          const rowObject = new Row(this.adventure, row);
+          this.adventure.processRow(rowObject);
+        } catch (err) {
+          logger.error(`Error processing row ${row.id}: ${err.message}`);
+        }
       }
-      // this.finishedFunction(statement.length);
-  
     } catch (err) {
+      logger.error('Database getData failed');
       logger.error(err);
-      logger.error(err.stack);
+      throw err;
     }
     this.closeDB();
   }

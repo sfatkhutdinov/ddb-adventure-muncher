@@ -4,13 +4,14 @@ const _ = require("lodash");
 const fs = require("fs");
 const path = require("path");
 const { exit } = require("process");
+const fse = require("fs-extra");
 
 const { Config } = require("./adventure/Config.js");
 const { Adventure } = require("./adventure/Adventure.js");
 const { FileHelper } = require("./adventure/FileHelper.js");
 
-function saveIndividualScenes(adjustments, conf) {
-  adjustments.forEach((adjustment) => {
+async function saveIndividualScenes(adjustments, conf) {
+  for (const adjustment of adjustments) {
     const flags = adjustment.flags.ddb;
     const ddbId = flags.ddbId;
     const cobaltId = flags.cobaltId ? `-${flags.cobaltId}` : "";
@@ -19,22 +20,20 @@ function saveIndividualScenes(adjustments, conf) {
     const sceneRef = `${conf.bookCode}-${ddbId}${cobaltId}${parentId}${contentChunkId}`;
     const sceneDataDir = path.join(conf.sceneInfoDir, conf.bookCode);
     const sceneDataFile = path.join(sceneDataDir, `${sceneRef}-scene.json`);
-
     console.log(`Sceneref: ${sceneRef}`);
-    // console.log(`sceneDataDir: ${sceneDataDir}`);
-    // console.log(`sceneDataFile: ${sceneDataFile}`);
     const sceneDataPath = path.resolve(__dirname, sceneDataFile);
-
     console.log(`Exporting datafile ${sceneDataPath}`);
-    if (!fs.existsSync(sceneDataDir)) {
-      console.log(`Creating dir ${sceneDataDir}`);
-      fs.mkdirSync(sceneDataDir);
+    try {
+      if (!(await FileHelper.loadFile(sceneDataDir))) {
+        console.log(`Creating dir ${sceneDataDir}`);
+        await fse.mkdirp(sceneDataDir);
+      }
+    } catch (e) {
+      // Directory may not exist, create it
+      await fse.mkdirp(sceneDataDir);
     }
-    if (fs.existsSync(sceneDataPath)){
-      console.log(`Scene ${sceneDataPath} exists, replacing.`);
-    }
-    FileHelper.saveJSONFile(adjustment, sceneDataPath);
-  });
+    await FileHelper.saveJSONFile(adjustment, sceneDataPath);
+  }
 }
 
 function listSceneIds(bookCode) {
@@ -53,16 +52,21 @@ function listSceneIds(bookCode) {
   });
 }
 
-function getDDBMetaData(conf) {
-  const meta = FileHelper.loadJSONFile(path.resolve(conf.sceneInfoDir, "../meta.json"));
+async function getDDBMetaData(conf) {
+  const meta = await FileHelper.loadJSONFile(path.resolve(conf.sceneInfoDir, "../meta.json"));
   return meta;
 }
 
-function updateDDBMetaData(conf, key, update) {
+async function updateDDBMetaData(conf, key, update) {
   const metaPath = path.resolve(conf.sceneInfoDir, "../meta.json");
-  const meta = FileHelper.loadJSONFile(metaPath);
+  let meta;
+  try {
+    meta = await FileHelper.loadJSONFile(metaPath);
+  } catch (e) {
+    meta = { scenes: {} };
+  }
   meta.scenes[key] = update;
-  FileHelper.saveJSONFile(meta, metaPath);
+  await FileHelper.saveJSONFile(meta, metaPath);
 }
 
 async function importScene(conf, sceneFile) {
@@ -467,11 +471,16 @@ async function importScene(conf, sceneFile) {
   // tokens exist in the flags and are regenerated later
   delete inData.tokens;
 
-  // if (inData.flags && inData.flags.ddb && inData.flags.ddb.contentChunkId && !inData.flags.ddb.contentChunkId.startsWith("ddb-missing") && inData.name !== lookup.name) {
-  //   inData.name = lookup.name;
-  //   console.log("Indata update from missing scene");
-  //   inDataUpdate = true;
-  // }
+  // Restore scene name update logic if contentChunkId is present and not missing, and names differ
+  if (
+    inData.flags && inData.flags.ddb && inData.flags.ddb.contentChunkId &&
+    !inData.flags.ddb.contentChunkId.startsWith("ddb-missing") &&
+    lookup && inData.name !== lookup.name
+  ) {
+    inData.name = lookup.name;
+    console.log("Indata update from missing scene");
+    inDataUpdate = true;
+  }
 
   console.log("********************");
   console.log("Lookup data:");

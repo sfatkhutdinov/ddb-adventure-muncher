@@ -3,6 +3,8 @@ const path = require("path");
 const fs = require("fs");
 const { exit } = require("process");
 const _ = require("lodash");
+const Ajv = require("ajv");
+const configSchema = require("./config.schema.json");
 
 const ddb = require("../data/ddb.js");
 const enhance = require("../data/enhance.js");
@@ -26,7 +28,7 @@ class Config {
     this.data[settingName] = value;
   }
 
-  setConfigDirs(configDir) {
+  async setConfigDirs(configDir) {
     this.configDir = configDir;
     this.dbDir = `${configDir}/content`;
     this.buildDir = `${configDir}/build`;
@@ -48,10 +50,10 @@ class Config {
       this.tablesDir,
       this.journalsDir,
     ];
-    FileHelper.checkDirectories(directories);
+    await FileHelper.checkDirectories(directories);
   }
 
-  #generateFixDirectories() {
+  async #generateFixDirectories() {
     if (!this.data.generateFixes) return;
 
     this.fixes = {
@@ -70,7 +72,7 @@ class Config {
       this.fixes.tablesDir,
       this.fixes.journalsDir,
     ];
-    FileHelper.checkDirectories(directories);
+    await FileHelper.checkDirectories(directories);
   }
 
   #environmentOverrides() {
@@ -128,12 +130,12 @@ class Config {
     }
   }
 
-  #loadExternalConfig() {
+  async #loadExternalConfig() {
     if (this.options.externalConfigFile) {
       const externalConfigPath = path.resolve(__dirname, this.options.externalConfigFile);
-      if (fs.existsSync(externalConfigPath)){
+      if (await fse.pathExists(externalConfigPath)){
         logger.info(`Getting External Config file ${this.options.externalConfigFile}`);
-        const externalConfig = FileHelper.loadConfig(externalConfigPath);
+        const externalConfig = await FileHelper.loadConfig(externalConfigPath);
         delete(this.data.cobalt);
         delete(this.data.lookups);
         this.data = _.merge(this.data, externalConfig);
@@ -170,8 +172,13 @@ class Config {
     await this.getMetaData();
   
     // Checking user and authentication
-    this.userData = await ddb.getUserData(this.data.cobalt);
-  
+    try {
+      this.userData = await ddb.getUserData(this.data.cobalt);
+    } catch (err) {
+      logger.error('Failed to fetch user data from DDB');
+      logger.error(err);
+      throw new Error('Could not authenticate with DDB. Please check your cobalt token.');
+    }
     if (this.userData.status !== "success") {
       logger.info(this.userData);
       logger.warn("Unable to determine DDB user");
@@ -299,60 +306,83 @@ class Config {
   
   }
 
+  static validateConfig(config) {
+    const ajv = new Ajv({ allErrors: true });
+    const validate = ajv.compile(configSchema);
+    const valid = validate(config);
+    if (!valid) {
+      const errors = validate.errors.map(e => `${e.instancePath} ${e.message}`).join("; ");
+      throw new Error(`Invalid config: ${errors}`);
+    }
+    return true;
+  }
+
+  static async loadConfigFile(file) {
+    const config = await FileHelper.loadJSONFile(file);
+    Config.validateConfig(config);
+    return config;
+  }
+
   constructor(options = {}) {
-    console.debug("Passed Options", options);
-    this.options = options;
-    this.version = options.version || null;
+    (async () => {
+      console.debug("Passed Options", options);
+      this.options = options;
+      this.version = options.version || null;
 
-    if (options.returns) {
-      logger.info("Setting return functions");
-      this.returns = options.returns;
-    } else {
-      logger.info("Keeping empty return functions");
-      this.returns = null;
-    }
-
-    const configDir = (process.env.CONFIG_DIR)
-      ? process.env.CONFIG_DIR
-      : options.configDir 
-        ? options.configDir
-        : Config.DEFAULT_CONFIG_DIR;
-    logger.info(`Using initial config directory ${configDir}`);
-    this.setConfigDirs(configDir);
-    // override config with environment vars
-    this.#environmentOverrides();
-
-    logger.info(`Config Directory is now ${this.configDir}`);
-    logger.info(`Loading ${this.configFile}`);
-
-    this.data = FileHelper.loadConfig(this.configFile);
-    if (this.data.run) delete(this.data.run);
-
-    this.downloadTimeout = this.data.downloadTimeout ? this.data.downloadTimeout : Config.TIMEOUT;
-    
-    this.#loadExternalConfig();
-  
-    if (options.outputDirPath) {
-      const outPutPath = path.resolve(__dirname,options.outputDirPath);
-      logger.debug(`Checking output path ${outPutPath}`);
-      if (fs.existsSync(outPutPath)){
-        logger.debug(`Setting output path to ${outPutPath}`);
-        this.data.outputDirEnv = outPutPath;
+      if (options.returns) {
+        logger.info("Setting return functions");
+        this.returns = options.returns;
+      } else {
+        logger.info("Keeping empty return functions");
+        this.returns = null;
       }
-    }
 
-    this.#setDefaultConfig();
-    FileHelper.checkDirectories([this.downloadDir]);
-    this.#generateFixDirectories();
+      const configDir = (process.env.CONFIG_DIR)
+        ? process.env.CONFIG_DIR
+        : options.configDir 
+          ? options.configDir
+          : Config.DEFAULT_CONFIG_DIR;
+      logger.info(`Using initial config directory ${configDir}`);
+      await this.setConfigDirs(configDir);
+      // override config with environment vars
+      this.#environmentOverrides();
 
-    // save config
-    FileHelper.saveJSONFile(this.data, this.configFile);
+      logger.info(`Config Directory is now ${this.configDir}`);
+      logger.info(`Loading ${this.configFile}`);
+
+      try {
+        this.data = await Config.loadConfigFile(this.configFile);
+      } catch (err) {
+        logger.error(`Config validation failed: ${err.message}`);
+        throw err;
+      }
+      if (this.data.run) delete(this.data.run);
+
+      this.downloadTimeout = this.data.downloadTimeout ? this.data.downloadTimeout : Config.TIMEOUT;
+      await this.#loadExternalConfig();
     
-    if (this.data.debug) {
-      logger.setLogLevel("silly");
-    } else {
-      logger.setLogLevel(this.data.logLevel);
-    }
+      if (options.outputDirPath) {
+        const outPutPath = path.resolve(__dirname,options.outputDirPath);
+        logger.debug(`Checking output path ${outPutPath}`);
+        if (await fse.pathExists(outPutPath)){
+          logger.debug(`Setting output path to ${outPutPath}`);
+          this.data.outputDirEnv = outPutPath;
+        }
+      }
+
+      this.#setDefaultConfig();
+      await FileHelper.checkDirectories([this.downloadDir]);
+      await this.#generateFixDirectories();
+
+      // save config
+      await FileHelper.saveJSONFile(this.data, this.configFile);
+      
+      if (this.data.debug) {
+        logger.setLogLevel("silly");
+      } else {
+        logger.setLogLevel(this.data.logLevel);
+      }
+    })();
   }
 
   

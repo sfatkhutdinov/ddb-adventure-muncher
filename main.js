@@ -10,6 +10,7 @@ const path = require("path");
 const fs = require("fs");
 const _ = require("lodash");
 const logger = require("./munch/logger.js");
+const fse = require("fs-extra");
 // immediately clear the log file
 logger.clear();
 
@@ -75,7 +76,11 @@ const menuTemplate = [
         click: async () => {
           const configFile = path.join(configDir, "config.json");
           logger.info(configFile);
-          if (fs.existsSync(configFile)) fs.unlinkSync(configFile);
+          try {
+            if (await fse.pathExists(configFile)) await fse.unlink(configFile);
+          } catch (err) {
+            logger.error(`Failed to remove config file: ${err.message}`);
+          }
         },
       },
       {
@@ -83,10 +88,14 @@ const menuTemplate = [
         click: async () => {
           const lookupPathV3 = path.join(configDir, "lookup.json");
           logger.info(lookupPathV3);
-          if (fs.existsSync(lookupPathV3)) fs.unlinkSync(lookupPathV3);
-          const lookupPathV4 = path.join(configDir, "lookup4.json");
-          logger.info(lookupPathV4);
-          if (fs.existsSync(lookupPathV4)) fs.unlinkSync(lookupPathV4);
+          try {
+            if (await fse.pathExists(lookupPathV3)) await fse.unlink(lookupPathV3);
+            const lookupPathV4 = path.join(configDir, "lookup4.json");
+            logger.info(lookupPathV4);
+            if (await fse.pathExists(lookupPathV4)) await fse.unlink(lookupPathV4);
+          } catch (err) {
+            logger.error(`Failed to remove lookup files: ${err.message}`);
+          }
         },
       },
       {
@@ -94,30 +103,16 @@ const menuTemplate = [
         click: async () => {
           const downloadPath = path.join(configDir, "content");
           logger.info(downloadPath);
-          if (fs.existsSync(downloadPath)) {
-            fs.rm(downloadPath, { recursive: true }, (err) => {
-              if (err) {
-                throw err;
-              }
-            });
-          }
-          const buildPath = path.join(configDir, "build");
-          logger.info(buildPath);
-          if (fs.existsSync(buildPath)) {
-            fs.rm(buildPath, { recursive: true }, (err) => {
-              if (err) {
-                throw err;
-              }
-            });
-          }
-          const metaPath = path.join(configDir, "meta");
-          logger.info(metaPath);
-          if (fs.existsSync(metaPath)) {
-            fs.rm(metaPath, { recursive: true }, (err) => {
-              if (err) {
-                throw err;
-              }
-            });
+          try {
+            if (await fse.pathExists(downloadPath)) await fse.rm(downloadPath, { recursive: true, force: true });
+            const buildPath = path.join(configDir, "build");
+            logger.info(buildPath);
+            if (await fse.pathExists(buildPath)) await fse.rm(buildPath, { recursive: true, force: true });
+            const metaPath = path.join(configDir, "meta");
+            logger.info(metaPath);
+            if (await fse.pathExists(metaPath)) await fse.rm(metaPath, { recursive: true, force: true });
+          } catch (err) {
+            logger.error(`Failed to remove directories: ${err.message}`);
           }
         },
       },
@@ -163,10 +158,14 @@ const menuTemplate = [
         click: async () => {
           const configFile = path.join(configDir, "config.json");
           logger.info(configDir);
-          if (fs.existsSync(configFile)) {
-            shell.showItemInFolder(configFile);
-          } else {
-            shell.showItemInFolder(configDir);
+          try {
+            if (await fse.pathExists(configFile)) {
+              shell.showItemInFolder(configFile);
+            } else {
+              shell.showItemInFolder(configDir);
+            }
+          } catch (err) {
+            logger.error(`Failed to show config location: ${err.message}`);
           }
         },
       },
@@ -178,10 +177,14 @@ const menuTemplate = [
             : path.join(configDir, "logs");
           const logFile = path.join(logFolder, "main.log");
           logger.info(logFolder);
-          if (fs.existsSync(logFile)) {
-            shell.showItemInFolder(logFile);
-          } else {
-            shell.showItemInFolder(logFolder);
+          try {
+            if (await fse.pathExists(logFile)) {
+              shell.showItemInFolder(logFile);
+            } else {
+              shell.showItemInFolder(logFolder);
+            }
+          } catch (err) {
+            logger.error(`Failed to show log file location: ${err.message}`);
           }
         },
       },

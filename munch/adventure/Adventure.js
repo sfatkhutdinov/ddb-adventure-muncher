@@ -11,6 +11,7 @@ const { FileHelper } = require("./FileHelper.js");
 const { Assets } = require("./Assets.js");
 const { Helpers } = require("./Helpers.js");
 const { getEnhancedData } = require("../data/enhance.js");
+const { validateFoundryDocument } = require("./validateFoundry.js");
 
 const fs = require("fs");
 const path = require("path");
@@ -260,14 +261,14 @@ class Adventure {
 
   }
 
-  saveJson() {
+  async saveJson() {
     // output all adventure elements to json
     logger.info("Generating output files...");
-    this.#outputAdventure();
-    this.#outputJournals();
-    this.#outputScenes();
-    this.#outputTables();
-    this.#outputFolders();
+    await this.#outputAdventure();
+    await this.#outputJournals();
+    await this.#outputScenes();
+    await this.#outputTables();
+    await this.#outputFolders();
   }
 
   writeFixes() {
@@ -284,7 +285,6 @@ class Adventure {
   }
 
   async processAdventure() {
-
     try {
       // reset build directories
       FileHelper.directoryReset(this.config);
@@ -294,48 +294,46 @@ class Adventure {
       await this.loadEnhancements();
       // load up hint data
       this.loadHints();
-
       // the this.processRow will loop through each row and do a first pass
       // for:
       // process Journals
       // process Scenes
       // process Tables
       const db = new Database(this);
-      db.getData();
-
+      try {
+        db.getData();
+      } catch (err) {
+        logger.error(`Failed to process database: ${err.message}`);
+        throw err;
+      }
       // we do some second passes to fix up links for generated images, scenes etc
       this.#fixUpAdventure();
-
       // link notes to scenes
       this.sceneFactory.addNotes();
-
       // generate mock actors
       this.#mockMonsterCreation();
-
       // we copy assets and save out generated json
       await this.downloadEnhancementAssets();
       this.copyAssets();
       this.saveJson();
       this.writeFixes();
-
       // save the zip out
       await this.saveZip();
-
     } catch (error) {
       logger.error(`Error generating adventure: ${error}`);
       logger.error(error.stack);
+      throw error;
     } finally {
       logger.info("Generated the following journal assets:");
       logger.info(this.assets);
       logger.info("Generated the following scene images:");
       logger.info(this.sceneImages);
-      if (this.bad.notes.length > 0) {
+      if (this.bad && this.bad.notes && this.bad.notes.length > 0) {
         logger.error("Bad notes found");
         this.bad.notes.forEach((note) => {
           logger.warn(note);
         });
       }
-
       this.#saveMetrics();
       if (this.returns) {
         this.returns.returnAdventure(this);
@@ -447,8 +445,7 @@ class Adventure {
     await this.assetFactory.generateZipFile();
   }
 
-  #outputAdventure() {
-
+  async #outputAdventure() {
     this.data.required.monsters = [...this.required.monsters];
     this.data.required.items = [...this.required.items];
     this.data.required.spells = [...this.required.spells];
@@ -459,27 +456,26 @@ class Adventure {
     this.data.required.actions = [...this.required.actions];
     this.data.required.weaponproperties = [...this.required.weaponproperties];
 
-    if (!fs.existsSync(this.config.outputDir)) {
-      fs.mkdirSync(this.config.outputDir);
+    // Ensure output directories exist
+    await FileHelper.checkDirectories([this.config.outputDir]);
+    for (const d of this.config.data.subDirs) {
+      await FileHelper.checkDirectories([path.join(this.config.outputDir, d)]);
     }
-  
-    this.config.data.subDirs.forEach((d) => {
-      if (!fs.existsSync(path.join(this.config.outputDir,d))) {
-        fs.mkdirSync(path.join(this.config.outputDir,d));
-      }
-    });
-  
-    logger.info("Exporting adventure outline...");
 
+    logger.info("Exporting adventure outline...");
     const adventureData = JSON.stringify(this.data);
-    fs.writeFileSync(path.join(this.config.outputDir,"adventure.json"), adventureData);
+    await FileHelper.saveFile(adventureData, path.join(this.config.outputDir, "adventure.json"));
+    try {
+      validateFoundryDocument(this.data, "adventure");
+    } catch (err) {
+      logger.error(`Adventure export validation failed: ${err.message}`);
+      throw err;
+    }
   }
 
-  #outputJournals() {
+  async #outputJournals() {
     logger.info(`Exporting ${this.journals.length} journals...`);
-  
-    // journals out
-    this.journals.forEach((journal) => {
+    for (const journal of this.journals) {
       const filePath = path.join(this.config.outputDir, "journal", `${journal.id}.json`);
       logger.info({
         title: journal.row.data.title,
@@ -501,18 +497,21 @@ class Adventure {
           })
         : [];
       if (pagesNoContent.length > 0) logger.error("missing pages", pagesNoContent);
-      fs.writeFileSync(filePath, journal.toJson());
-    });
+      try {
+        validateFoundryDocument(journal.data, "journal");
+      } catch (err) {
+        logger.error(`Journal export validation failed for ${journal.data.name}: ${err.message}`);
+        throw err;
+      }
+      await FileHelper.saveFile(journal.toJson(), filePath);
+    }
   }
 
-  #outputScenes() {
+  async #outputScenes() {
     logger.info("Generated Scenes:");
     logger.info(this.scenes.map((s) => `${s.data.name} : ${s.id} : ${s.data.flags.ddb.contentChunkId } : ${s.data.flags.ddb.ddbId } : ${s.data.flags.ddb.cobaltId } : ${s.data.flags.ddb.parentId } : ${s.image}`));
-
     logger.info(`Exporting ${this.scenes.length} scenes...`);
-
-    // scenes out
-    this.scenes.forEach((scene) => {
+    for (const scene of this.scenes) {
       logger.debug(`Exporting Scene ${scene.data.name} with id "${scene.id}"`);
       const filePath = path.join(this.config.outputDir,"scene",`${scene.id}.json`);
       logger.info({
@@ -520,27 +519,35 @@ class Adventure {
         id: scene.id,
         path: filePath,
       });
-      fs.writeFileSync(filePath, scene.toJson());
-    });
-
+      try {
+        validateFoundryDocument(scene.data, "scene");
+      } catch (err) {
+        logger.error(`Scene export validation failed for ${scene.data.name}: ${err.message}`);
+        throw err;
+      }
+      await FileHelper.saveFile(scene.toJson(), filePath);
+    }
     logger.debug("Scene export complete");
-
   }
   
   
-  #outputTables() {
+  async #outputTables() {
     logger.info("Exporting tables...");
-  
-    // tables out
-    this.tables.forEach((table) => {
+    for (const table of this.tables) {
       const filePath = path.join(this.config.outputDir,"table",`${table.id}.json`);
       logger.info({
         name: table.data.name,
         id: table.id,
         path: filePath,
       });
-      fs.writeFileSync(filePath, table.toJson());
-    });
+      try {
+        validateFoundryDocument(table.data, "table");
+      } catch (err) {
+        logger.error(`Table export validation failed for ${table.data.name}: ${err.message}`);
+        throw err;
+      }
+      await FileHelper.saveFile(table.toJson(), filePath);
+    }
   }
 
   #hasFolderContent(folder) {
@@ -585,11 +592,11 @@ class Adventure {
     }).map((folder) => folder._id);
   }
 
-  #outputFolders() {
+  async #outputFolders() {
     logger.info("Exporting required folders...");
     const finalFolders = this.folders.filter((folder) => this.#hasFolderContent(folder));
     const foldersData = JSON.stringify(finalFolders);
-    fs.writeFileSync(path.join(this.config.outputDir,"folders.json"), foldersData);
+    await FileHelper.saveFile(foldersData, path.join(this.config.outputDir,"folders.json"));
   }
 
 }

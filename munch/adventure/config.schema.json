@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DDB Adventure Muncher Config",
+  "type": "object",
+  "properties": {
+    "cobalt": { "type": "string" },
+    "outputDir": { "type": "string" },
+    "downloadTimeout": { "type": "number" },
+    "logLevel": { "type": "string", "enum": ["error", "warn", "info", "verbose", "debug", "silly"] },
+    "disableEnhancedDownloads": { "type": "boolean" },
+    "ddbNoCheck": { "type": "boolean" },
+    "forceNew": { "type": "boolean" },
+    "updateVersions": { "type": "boolean" },
+    "generateFixes": { "type": "boolean" },
+    "outputKey": { "type": "boolean" },
+    "noteAdminMode": { "type": "boolean" },
+    "observeAll": { "type": "boolean" },
+    "schemaVersion": { "type": "number" },
+    "subDirs": { "type": "array", "items": { "type": "string" } }
+  },
+  "required": ["cobalt", "outputDir", "logLevel", "schemaVersion", "subDirs"],
+  "additionalProperties": true
+}

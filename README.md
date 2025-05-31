@@ -88,3 +88,34 @@ Examples:
 The scene adjustments and walling data is released as unofficial Fan Content permitted under the Fan Content Policy.
 Not approved/endorsed by Wizards.
 Portions of the materials used are property of Wizards of the Coast. ©Wizards of the Coast LLC.
+
+## Async/Await Refactor and Error Handling
+
+- As of May 2025, the codebase is being refactored to use async/await and non-blocking file operations throughout all helpers and core modules. This ensures the event loop is not blocked and improves performance, especially in Electron environments.
+- All file and directory operations in FileHelper.js and Assets.js now use async/await and fs-extra.
+- Config.js is being updated to use async/await for all file and directory setup and config loading.
+- If you are working on this project, continue updating any remaining sync file operations and ensure all async calls are properly awaited and wrapped in try/catch for robust error handling.
+- Update this section as you continue the migration or if you add new async helpers.
+
+## Async Refactoring & Error Handling (2025 Update)
+
+- All file and directory operations now use async/await and non-blocking methods via `fs-extra`.
+- All major export and processing functions are now asynchronous and must be awaited.
+- If you are developing or extending this project, ensure you use `await` and proper error handling (try/catch) for all file, directory, and network operations.
+- See the ROADMAP.md for ongoing and completed improvements.
+
+## Developer Notes
+
+- If you are picking up this project, check the ROADMAP.md for current focus and completed work.
+- The codebase is being actively refactored for async/await and robust error handling.
+- When adding new features, follow the async/await pattern and update documentation as you go.
+
+## Roadmap Progress
+
+- See ROADMAP.md for a checklist of completed and pending improvements.
+- When you complete a major refactor or improvement, update this section and the roadmap.
+
+## Usage Note
+
+- If you are using the CLI or integrating this tool, be aware that some commands and helpers may now return Promises and require async handling.
+- See the code comments and function signatures for details.
